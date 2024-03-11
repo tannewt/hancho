@@ -370,6 +370,7 @@ async def expand_async(rule, template, depth=0):
         result += template[0 : span.start()]
         exp = template[span.start() : span.end()]
         try:
+            print("replace", exp[1:-1], rule.input_files)
             replacement = eval(exp[1:-1], globals(), rule)  # pylint: disable=eval-used
             replacement = await expand_async(rule, replacement, depth + 1)
             result += replacement
@@ -433,6 +434,12 @@ class Rule(dict):
         super().__init__(self)
         self |= kwargs
         self.base = config if base is None else base
+        if base is None:
+            print([(x.filename, x.function) for x in inspect.stack(context=0)])
+            self.task_dir = Path(inspect.stack(context=0)[1].filename).parent
+            print("captured task dir", self.task_dir)
+        else:
+            self.task_dir = base.task_dir
 
     def __missing__(self, key):
         if self.base:
@@ -476,7 +483,9 @@ class Rule(dict):
         task.files_in = files_in
         if files_out is not None:
             task.files_out = files_out
-        task.script_dir = Path.cwd().absolute()
+        task
+        task.file_root = Path(inspect.stack(context=0)[1].filename).parent
+        print("capturing script directory", task.file_root)
         task |= kwargs
         coroutine = task.async_call()
         task.promise = asyncio.create_task(coroutine)
@@ -510,7 +519,7 @@ class Rule(dict):
     # pylint: disable=too-many-return-statements,too-many-branches
 
     async def dispatch(self):
-        """Does all the bookkeeping and depedency checking, then runs the command if needed."""
+        """Does all the bookkeeping and dependency checking, then runs the command if needed."""
         desc = await expand_async(self, self.desc)
 
         # Check for missing fields
@@ -534,19 +543,22 @@ class Rule(dict):
         self.build_dir2 = (
             this.hancho_root
             / self.build_dir2
-            / self.script_dir.relative_to(this.hancho_root)
         )
-        self.src_dir = this.hancho_root / self.script_dir.relative_to(this.hancho_root)
+        print(self.build_dir2)
+        self.src_dir = this.hancho_root / self.file_root.relative_to(this.hancho_root)
 
         # FIXME - We need to do this with self.task_dir as well
 
         self.abs_files_in = [self.src_dir / f for f in self.files_in]
+        print(self.files_out)
         self.abs_files_out = [self.build_dir2 / f for f in self.files_out]
         self.abs_deps = [self.src_dir / f for f in self.deps]
 
         # Strip hancho_root off the absolute paths to produce root-relative paths
         self.files_in = [f.relative_to(this.hancho_root) for f in self.abs_files_in]
+        print(self.files_in)
         self.files_out = [f.relative_to(this.hancho_root) for f in self.abs_files_out]
+        print(self.files_out)
         self.deps = [f.relative_to(this.hancho_root) for f in self.abs_deps]
 
         # Check for duplicate task outputs
@@ -635,6 +647,7 @@ class Rule(dict):
 
         # Create the subprocess via asyncio and then await the result.
         with Chdir(self.task_dir):
+            print("changing to", self.task_dir)
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -660,7 +673,7 @@ class Rule(dict):
             )
 
         # Task passed, return the output file list
-        return self.abs_files_out
+        return self.files_out
 
     ########################################
     # Pylint really doesn't like this function, lol.
