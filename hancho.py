@@ -482,6 +482,13 @@ async def flatten_async(rule, elements, depth=0):
     strings, promises, and callbacks into a flat array.
     """
 
+    if isinstance(elements, Task):
+        elements = elements.promise
+
+    if inspect.isawaitable(elements):
+        elements = await elements
+        log(f"awaited {elements} to flatten")
+
     if not isinstance(elements, list):
         elements = [elements]
 
@@ -489,7 +496,7 @@ async def flatten_async(rule, elements, depth=0):
     for element in elements:
         if inspect.isfunction(element):
             result.append(element)
-        elif isinstance(element, list):
+        elif isinstance(element, Task) or isinstance(element, list) or inspect.isawaitable(element):
             new_element = await flatten_async(rule, element, depth + 1)
             result.extend(new_element)
         else:
